@@ -1,0 +1,89 @@
+name: Deploy infrastructure on LocalStack
+
+on:
+  workflow_dispatch:
+
+env:
+  LOCALSTACK_API_KEY: ${{ secrets.LOCALSTACK_API_KEY }}
+
+jobs:
+  cloudpods:
+    name: Deploy infrastructure using CloudFormation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the sample
+        uses: actions/checkout@v4
+        with:
+          repository: localstack-samples/sample-terraform-ecs-apigateway
+
+      - name: Set up Python 3.11
+        id: setup-python
+        uses: actions/setup-python@v2
+        with:
+          python-version: "3.11"
+
+      - name: Start LocalStack
+        env:
+          DNS_ADDRESS: 0
+        run: |
+          pip install awscli-local[ver1]
+          pip install --pre localstack
+          docker pull localstack/localstack-pro:latest
+
+          # Start LocalStack in the background
+          localstack start -d
+
+          # Wait 30 seconds for the LocalStack container to become ready before timing out
+          echo "Waiting for LocalStack startup..."
+          localstack wait -t 15
+
+          echo "Startup complete"
+
+      - name: Deploy on CloudFormation
+        run: |
+          cd cloudformation
+          awslocal cloudformation create-stack --stack-name pod-stack --template-body file://ecsapi-demo-cloudformation.yaml
+
+      - name: Check deployed resources
+        run: |
+          sleep 60
+          awslocal cloudformation describe-stacks --stack-name pod-stack | grep StackStatus
+
+      - name: Save infra Cloud Pod
+        run: |
+          localstack pod save ecs-apigateway-infra
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+    
+      - name: Setup Yarn
+        run: npm install -g yarn
+
+      - name: Build web app
+        env:
+          CI: false
+        run: |
+          cd client-application-react
+          yarn
+          yarn build
+    
+      - name: Deploy web app
+        run: |
+          cd client-application-react
+          awslocal s3 mb s3://sample-app
+          awslocal s3 sync build s3://sample-app
+
+      - name: Print the URL
+        run: |
+          export API_ID=$(awslocal apigatewayv2 get-apis | jq -r '.Items[] | select(.Name=="ecsapi-demo") | .ApiId')
+          export POOL_ID=$(awslocal cognito-idp list-user-pools --max-results 1 | jq -r '.UserPools[0].Id')
+          export CLIENT_ID=$(awslocal cognito-idp list-user-pool-clients --user-pool-id $POOL_ID | jq -r '.UserPoolClients[0].ClientId')
+          export URL="http://sample-app.s3.localhost.localstack.cloud:4566/index.html?stackregion=us-east-1&stackhttpapi=$API_ID&stackuserpool=$POOL_ID&stackuserpoolclient=$CLIENT_ID"
+          echo $URL
+      
+      - name: Save front end Cloud Pod
+        run: |
+          localstack pod save --services s3 ecs-apigateway-fe
+  
