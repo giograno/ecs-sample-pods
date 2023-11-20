@@ -122,3 +122,7 @@ jobs:
                   "breed": {"S": "collie"}
                 }' \
               --return-consumed-capacity TOTAL
+
+      - name: Save DB Cloud Pod
+        run: |
+          localstack pod save --services dynamodb ecs-apigateway-db
