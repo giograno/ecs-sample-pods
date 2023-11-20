@@ -23,15 +23,14 @@ jobs:
           python-version: "3.11"
 
       - name: Start LocalStack
-        env:
-          DNS_ADDRESS: 0
         run: |
           pip install awscli-local[ver1]
           pip install --pre localstack
           docker pull localstack/localstack-pro:latest
 
           # Start LocalStack in the background
-          localstack start -d
+          EXTRA_CORS_ALLOWED_ORIGINS=http://sample-app.s3.localhost.localstack.cloud:4566 DISABLE_CUSTOM_CORS_APIGATEWAY=1 DEBUG=1 localstack start -d
+
 
           # Wait 30 seconds for the LocalStack container to become ready before timing out
           echo "Waiting for LocalStack startup..."
@@ -87,3 +86,39 @@ jobs:
         run: |
           localstack pod save --services s3 ecs-apigateway-fe
   
+      - name: Add dummy date to the DDB table
+        run: |
+          tableName=${awslocal dynamodb list-tables | jq '.TableNames[] | select(contains("Petstore"))'}
+
+          awslocal dynamodb put-item \
+              --table-name ${tableName} \
+              --item '{
+                  "name": {"S": "miro"},
+                  "petId": {"S": "1"},
+                  "color": {"S": "black and white"},
+                  "species": {"S": "cat"},
+                  "breed": {"S": "european cat"}
+                }' \
+              --return-consumed-capacity TOTAL
+
+          awslocal dynamodb put-item \
+              --table-name ${tableName} \
+              --item '{
+                  "name": {"S": "rex"},
+                  "petId": {"S": "3"},
+                  "color": {"S": "black"},
+                  "species": {"S": "dog"},
+                  "breed": {"S": "german sheperd"}
+                }' \
+              --return-consumed-capacity TOTAL
+
+          awslocal dynamodb put-item \
+              --table-name ${tableName} \
+              --item '{
+                  "name": {"S": "lessie"},
+                  "petId": {"S": "2"},
+                  "color": {"S": "sable"},
+                  "species": {"S": "dog"},
+                  "breed": {"S": "collie"}
+                }' \
+              --return-consumed-capacity TOTAL
